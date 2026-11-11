@@ -2,13 +2,13 @@ from __future__ import annotations
 import json,shutil,tempfile,threading,time,uuid
 from pathlib import Path
 from . import schemas
-from .common import ProcessLock,NativeUncertain,AgentError,TERMINAL,read,write,digest
+from .common import ProcessLock,NativeUncertain,AgentError,TERMINAL,VERSION,read,write,digest,inside
 from .codex import CodexRunner,planner_prompt,review_prompt
 from .images import contacts,coordinate_preview,rgba,comparison,review_images,pixel_polygons,image_facts
 from .native import NativeBackend
 from .store import Store
 
-FLAGS=('reference_correct','subject_preserved','target_border_removed','background_correct','shape_and_alpha_ok')
+FLAGS=('reference_correct','subject_preserved','target_border_removed','removed_border_is_transparent','background_correct','shape_and_alpha_ok')
 
 def review_status(review,plan):
     if len(review.get('inspected_regions',[]))<3:raise ValueError('验收未记录足够的实际检查位置。')
@@ -24,6 +24,7 @@ def best_attempt(attempts):
 class Pipeline:
     def __init__(self,store,bid,stop=None,agent_factory=CodexRunner,backend_factory=NativeBackend,channel_lock=None):
         self.store=store;self.bid=bid;self.batch=store.batch(bid);self.settings=self.batch['settings']
+        if self.batch['manifest'].get('version')!=VERSION:raise ValueError('此批次使用旧版补色去边规则。请重新导入生成透明去边批次，旧记录保留供对比。')
         self.folder=store.root/'batches'/bid;self.stop=stop or threading.Event()
         self.items={i['id']:i for i in self.batch['manifest']['items']}
         self.agent=agent_factory(self.settings,self.log);self.backend_factory=backend_factory
@@ -199,8 +200,12 @@ def retry_exceptions(store,bid):
             if job['status'] not in ('failed','partial'):continue
             folder=store.root/'batches'/bid/'jobs'/job['source_id']
             if folder.exists():
-                archive=store.root/'batches'/bid/'retry_archive'/(job['source_id']+'-'+uuid.uuid4().hex);archive.parent.mkdir(parents=True,exist_ok=True);folder.rename(archive)
+                archive=store.root/'batches'/bid/'retry_archive'/(job['source_id']+'-'+uuid.uuid4().hex)
+                if not inside(folder,store.root) or not inside(archive,store.root):raise ValueError('归档路径越出结果目录。')
+                archive.parent.mkdir(parents=True,exist_ok=True);folder.rename(archive)
             delivery=store.root/'batches'/bid/'delivery'/job['status']/job['source_id']
             if delivery.exists():
-                archive=store.root/'batches'/bid/'retry_archive'/('delivery-'+job['source_id']+'-'+uuid.uuid4().hex);archive.parent.mkdir(parents=True,exist_ok=True);delivery.rename(archive)
+                archive=store.root/'batches'/bid/'retry_archive'/('delivery-'+job['source_id']+'-'+uuid.uuid4().hex)
+                if not inside(delivery,store.root) or not inside(archive,store.root):raise ValueError('归档路径越出结果目录。')
+                archive.parent.mkdir(parents=True,exist_ok=True);delivery.rename(archive)
         store.retry(bid)

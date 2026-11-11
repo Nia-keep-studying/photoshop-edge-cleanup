@@ -70,6 +70,7 @@ def raster(polys,size):
     return np.array(im)>0
 
 def compile_plan(plan,size,allow_colour=True):
+    if plan.get('edge_policy')!='transparent_remove':raise ValueError('旧的补色去边方案不可执行；请按抠成透明的新规则重新分析。')
     if plan.get('coordinate_system')!='normalized_1000':raise ValueError('未知坐标系统。')
     if plan['kind'] not in ('trim','export','unsupported'):raise ValueError('未知处理类型。')
     for field in ('reference_observations','remove_rules','preserve_rules'):
@@ -83,8 +84,8 @@ def compile_plan(plan,size,allow_colour=True):
     compiled=[];remove=[]
     for operation in operations:
         op=dict(operation)
-        if op['method'] not in ('white_edge','sample_edge','local_fill','contract'):raise ValueError('未支持的修补工具。')
-        if not allow_colour and op['method']!='contract':raise ValueError('本批次未授权补色。')
+        if op['method'] not in ('erase_edge','clear_specks','local_fill','contract'):raise ValueError('外围黑边须抠成透明；不再接受 white_edge/sample_edge 补色代替去边。')
+        if not allow_colour and op['method']=='local_fill':raise ValueError('本批次未授权内部局部补色。')
         if type(op['max_width']) is not int or not 1<=op['max_width']<=32:raise ValueError('边宽必须为 1..32 原图像素。')
         if op['width_mode'] not in ('auto','fixed'):raise ValueError('未知边宽模式。')
         for key in ('dark_threshold','chroma_limit','donor_tolerance'):
@@ -93,8 +94,8 @@ def compile_plan(plan,size,allow_colour=True):
         if type(op['edge_only']) is not bool:raise ValueError('边缘限制标记无效。')
         op['regions']=pixel_polygons(op['regions'],size);op['donor_regions']=pixel_polygons(op['donor_regions'],size)
         if not op['regions']:raise ValueError('修补操作没有范围。')
-        if op['method']=='sample_edge' and not op['donor_regions']:raise ValueError('同材质补色缺少取色区域。')
-        if op['method'] in ('white_edge','sample_edge') and not op['edge_only']:raise ValueError('外缘工具必须启用实际 alpha 外缘限制。')
+        if op['method']=='erase_edge' and (not op['edge_only'] or op['donor_regions']):raise ValueError('透明去边必须使用外缘限制，且不能使用补色取样区域。')
+        if op['method']=='clear_specks' and (op['edge_only'] or op['donor_regions']):raise ValueError('背景噪点清理按连通分量限制，须 edge_only=false 且不取色。')
         if op['method']=='local_fill' and raster(op['regions'],size).mean()>.15:raise ValueError('局部补色区域过大，应拆分或使用外缘工具。')
         remove.extend(op['regions']);compiled.append(op)
     return {'operations':compiled,'remove_regions':remove,'protect_regions':protect,'uncertain_regions':uncertain}
@@ -115,9 +116,24 @@ def candidate(prepared,plan,compiled):
             if reachable.any():width=min(width,max(1,int(np.ceil(np.quantile(depth[reachable],.99)))+2))
         eligible=dark&(depth<=width) if op['edge_only'] else dark
         count=int(eligible.sum());note=''
-        if op['method']=='contract':
+        if op['method']=='erase_edge':
+            # Delete only dark pixels connected to the actual exterior, within
+            # the authorized band. Disconnected nearby lettering stays intact.
+            eligible=ndi.binary_propagation(eligible&(depth<=2),mask=eligible)
+            count=int(eligible.sum());out[eligible,3]=0
+        elif op['method']=='clear_specks':
+            labels,_=ndi.label(out[:,:,3]>0,structure=np.ones((3,3)))
+            sizes=np.bincount(labels.ravel());sizes[0]=0
+            contained=np.bincount(labels[area],minlength=len(sizes))==sizes
+            tiny=(sizes>0)&(sizes<=8)&contained
+            if sizes.max():tiny[sizes.argmax()]=False
+            eligible=tiny[labels];count=int(eligible.sum());out[eligible,3]=0
+            note='Only fully contained detached components <=8 pixels; largest and protected components retained.'
+        elif op['method']=='contract':
             eroded=ndi.minimum_filter(alpha,size=2*width+1,mode='nearest')
             out[:,:,3]=np.where(area,eroded,out[:,:,3]);count=int((out[:,:,3]!=source[:,:,3]).sum())
+        elif np.any(eligible&(depth<=1)):
+            raise ValueError('局部补色触及透明外轮廓；外围描边应使用 erase_edge 抠透。')
         elif op['donor_regions']:
             colour=np.array(op['colour'],dtype='float32')
             donors=raster(op['donor_regions'],prepared.size)&core&(depth>width+2)&(np.abs(rgb-colour).max(2)<=op['donor_tolerance'])
@@ -127,11 +143,17 @@ def candidate(prepared,plan,compiled):
             smoothed=np.stack([ndi.gaussian_filter(rgb[:,:,c]*donors,3)/np.maximum(weight,1e-9) for c in range(3)],axis=2)
             out[eligible,:3]=np.clip(np.rint(smoothed[indices[0][eligible],indices[1][eligible]]),0,255).astype('uint8')
             note='donor_distance_p95='+str(round(float(np.quantile(distance[eligible],.95)),1)) if count else ''
-        else:out[eligible,:3]=[255,255,255] if op['method']=='white_edge' else op['colour']
+        else:out[eligible,:3]=op['colour']
         metrics.append({'method':op['method'],'width_used':width,'target_pixels':count,'note':note})
     allowed=raster(compiled['remove_regions'],prepared.size)&~protected
     out[~allowed]=source[~allowed]
     return Image.fromarray(out),metrics
+
+def alpha_audit(before,after):
+    a=np.array(before)[:,:,3];b=np.array(after)[:,:,3]
+    return {'alpha_reduced_pixels':int((b<a).sum()),
+            'fully_cleared_pixels':int(((a>0)&(b==0)).sum()),
+            'alpha_increased_pixels':int((b>a).sum())}
 
 def patch_assets(prepared,desired,folder):
     folder=Path(folder);a=np.array(prepared);b=np.array(desired)
@@ -146,6 +168,13 @@ def review_images(before,after,folder,compiled=None):
     for i,(bg,label) in enumerate([('white','白底'),('#dddddd','灰底'),('#343b46','深底')]):
         d.text((i*500+12,8),label,font=font(23),fill='#223344');paste_fit(sheet,result,(i*500+10,45,480,560),bg)
     whole=folder/'review_backgrounds.png';sheet.save(whole);paths=[whole]
+    a=np.array(original)[:,:,3];b=np.array(result)[:,:,3]
+    overlay=flatten(original);highlight=Image.new('RGBA',result.size,(224,48,130,0))
+    highlight.putalpha(Image.fromarray(((b<a)*210).astype('uint8')));overlay=overlay.convert('RGBA');overlay.alpha_composite(highlight)
+    sheet=Image.new('RGB',(1500,620),'#eeeeee');d=ImageDraw.Draw(sheet)
+    for i,(im,label) in enumerate([(original.getchannel('A').convert('RGB'),'原 alpha：白实黑透'),(result.getchannel('A').convert('RGB'),'结果 alpha：白实黑透'),(overlay,'粉色：alpha 实际降低区域')]):
+        d.text((i*500+12,8),label,font=font(21),fill='#223344');paste_fit(sheet,im,(i*500+10,45,480,560))
+    evidence=folder/'alpha_evidence.png';sheet.save(evidence);paths.append(evidence)
     alpha=np.array(original)[:,:,3]>=128;edge=alpha&~ndi.binary_erosion(alpha)
     tile=max(160,math.ceil(max(w,h)/6));boxes=[]
     for y in range(0,h,tile):

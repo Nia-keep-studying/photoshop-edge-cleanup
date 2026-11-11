@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 from .common import SKILL,NativeUncertain,read,write,digest,inside
-from .images import compile_plan,candidate,patch_assets,rgba
+from .images import compile_plan,candidate,patch_assets,rgba,alpha_audit
 
 sys.path.insert(0,str(SKILL/'scripts'))
 import ps_tool as ps
@@ -81,6 +81,9 @@ class NativeBackend:
             prepared,kind=ps.prepare_source(original,plan['remove_white_background'],plan['allow_edge_touching'],plan['frame_barriers'])
         if prepared.getchannel('A').getbbox() is None:raise ValueError('背景分离后主体为空。')
         prepared.save(folder/'prepared.png');desired,metrics=candidate(prepared,plan,compiled)
+        alpha_changes=alpha_audit(prepared,desired)
+        if any(op['method']=='erase_edge' for op in compiled['operations']) and not alpha_changes['fully_cleared_pixels']:
+            raise ValueError('透明去边没有清除任何目标像素，不能用颜色改变或空操作替代抠图。')
         coloured=patch_assets(prepared,desired,folder)
         request={'op':'set_plan','reference_observations':plan['reference_observations'],
                  'remove_rules':plan['remove_rules'],'preserve_rules':plan['preserve_rules'],
@@ -93,7 +96,7 @@ class NativeBackend:
         audit=rp.audit(folder/'prepared.png',folder/'candidate.png',scope)
         if audit['changes_outside_edit_scope']:raise ValueError('修补预览超出计划范围。')
         artifact={'plan_request':request,'compiled':compiled,'input_kind':kind,'colour_pixels':coloured,
-                  'metrics':metrics,'preflight_scope':scope,'source_hash':digest(source),'reference_hash':digest(reference) if reference else None}
+                  'metrics':metrics,'alpha_audit':alpha_changes,'preflight_scope':scope,'source_hash':digest(source),'reference_hash':digest(reference) if reference else None}
         write(folder/'prepared.json',artifact);return artifact
     def process(self,source,reference,plan,folder,artifact):
         folder=Path(folder);sid=None;uncertain=False
@@ -125,6 +128,7 @@ class NativeBackend:
             original=np.array(rgba(opened['png_path']))
             result={'png':state['png_path'],'psd':state['psd_path'],'before':opened['png_path'],'session':sid,
                     'scope_audit':audit,'candidate_difference_pixels':int(changed.sum()),
+                    'alpha_audit':alpha_audit(Image.fromarray(original),Image.fromarray(actual)),
                     'opaque_pixels_lost':int(((original[:,:,3]>=128)&(actual[:,:,3]<128)).sum()),'closed':False}
             if result['candidate_difference_pixels']:raise RuntimeError('实际 PS 导出与预览不同，不能自动判为通过。')
         except NativeUncertain:

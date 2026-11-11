@@ -7,16 +7,19 @@ from edge_batch.images import candidate,compile_plan,image_facts
 from edge_batch.importer import create_batch
 from edge_batch.pipeline import Pipeline,best_attempt,review_status,retry_exceptions
 from edge_batch.native import NativeBackend
+from edge_batch.codex import visual_input
 
 POLY=[[0,0],[1000,0],[1000,1000],[0,1000]]
 def plan():
     return dict(title='测试挂牌',kind='trim',reference_matches=True,is_flat_artwork=True,remove_white_background=False,
+                edge_policy='transparent_remove',
                 allow_edge_touching=False,frame_barriers=[],coordinate_system='normalized_1000',reference_observations=['无参考'],
                 remove_rules=['去额外外围黑线'],preserve_rules=['保留内部字'],protect_regions=[],uncertain_regions=[],unresolved_notes=[],
-                operations=[dict(method='white_edge',regions=[POLY],donor_regions=[],colour=[255,255,255],width_mode='auto',max_width=8,
+                operations=[dict(method='erase_edge',regions=[POLY],donor_regions=[],colour=[0,0,0],width_mode='auto',max_width=8,
                                  dark_threshold=235,chroma_limit=45,donor_tolerance=40,edge_only=True,reason='白底板黑线')])
 def review(ok=True,preserved=True):
     return dict(status='pass' if ok else 'repair',reference_correct=True,subject_preserved=preserved,target_border_removed=ok,
+                removed_border_is_transparent=ok,
                 background_correct=True,shape_and_alpha_ok=preserved,reason='已检查' if ok else '有残边',
                 issues=[] if ok else [dict(kind='residual',region=POLY,description='残边',suggestion='修补')],
                 inspected_regions=[dict(region=POLY,finding='检查边界') for _ in range(3)])
@@ -58,13 +61,47 @@ class BatchTests(unittest.TestCase):
         with self.assertRaises(ValueError):create_batch(self.inputs,None,self.inputs/'out',self.settings)
         with self.assertRaises(ValueError):create_batch('',None,self.root/'out',self.settings)
         with self.assertRaises(ValueError):create_batch(self.inputs,None,'',self.settings)
-    def test_preserves_alpha_interior_and_protected_edge(self):
+    def test_erases_border_alpha_preserves_white_plate_and_protected_art(self):
         p=plan();p['protect_regions']=[[[0,0],[1000,0],[1000,140],[0,140]]]
         with Image.open(self.inputs/'one.png') as im:original=im.convert('RGBA')
         result,metrics=candidate(original,p,compile_plan(p,original.size))
         a=np.array(original);b=np.array(result)
-        self.assertTrue(np.array_equal(a[:,:,3],b[:,:,3]));self.assertTrue(np.array_equal(a[:15],b[:15]));self.assertTrue(np.array_equal(a[40:61,40:61],b[40:61,40:61]))
-        self.assertGreater(metrics[0]['target_pixels'],0);self.assertTrue(np.all(b[50,10,:3]==255))
+        self.assertTrue(np.array_equal(a[:,:,:3],b[:,:,:3]));self.assertTrue(np.array_equal(a[:15],b[:15]));self.assertTrue(np.array_equal(a[40:61,40:61],b[40:61,40:61]))
+        self.assertTrue(np.array_equal(a[20:80,20:80],b[20:80,20:80]))
+        self.assertGreater(metrics[0]['target_pixels'],0);self.assertEqual(b[50,10,3],0);self.assertEqual(b[50,20,3],255)
+    def test_legacy_recolour_plan_rejected(self):
+        p=plan();p['operations'][0]['method']='white_edge'
+        with self.assertRaises(ValueError):compile_plan(p,(100,100))
+        p=plan();p.pop('edge_policy')
+        with self.assertRaises(ValueError):compile_plan(p,(100,100))
+    def test_nearby_disconnected_black_details_stay_opaque(self):
+        im=Image.new('RGBA',(80,80));d=ImageDraw.Draw(im)
+        d.rectangle((5,5,74,74),fill='white',outline='black',width=2);d.rectangle((10,20,11,40),fill='black')
+        p=plan();p['operations'][0]['width_mode']='fixed';p['operations'][0]['max_width']=12
+        output,_=candidate(im,p,compile_plan(p,im.size));a=np.array(output)
+        self.assertTrue(np.all(a[20:41,10:12,3]==255));self.assertEqual(a[30,5,3],0)
+    def test_outer_recolour_cannot_hide_under_local_fill(self):
+        with Image.open(self.inputs/'one.png') as im:original=im.convert('RGBA')
+        p=plan();p['operations'][0].update(method='local_fill',regions=[[[80,200],[140,200],[140,800],[80,800]]],colour=[255,255,255])
+        with self.assertRaises(ValueError):candidate(original,p,compile_plan(p,original.size))
+    def test_old_batch_cannot_resume_under_transparent_policy(self):
+        store,bid,p=self.make();batch=store.batch(bid);batch['manifest']['version']='batch-v1'
+        store.create('old',batch['settings'],batch['manifest'])
+        with self.assertRaises(ValueError):Pipeline(store,'old',agent_factory=FakeAgent,backend_factory=FakeNative)
+    def test_vision_preview_hides_rgb_of_transparent_pixels(self):
+        path=self.root/'transparent.png';Image.new('RGBA',(10,10),(0,0,0,0)).save(path)
+        preview=visual_input(path,self.root/'vision.png')
+        with Image.open(preview) as im:
+            self.assertEqual(im.mode,'RGB');self.assertEqual(im.getpixel((5,5)),(221,221,221))
+        with Image.open(path) as im:self.assertEqual(im.getpixel((5,5)),(0,0,0,0))
+    def test_speck_cleanup_keeps_main_shape_and_protected_components(self):
+        im=Image.new('RGBA',(100,100));d=ImageDraw.Draw(im);d.rectangle((20,20,80,80),fill='white')
+        d.line((50,15,50,20),fill='white');d.point((10,10),fill='white');d.point((90,90),fill='black')
+        p=plan();p['protect_regions']=[[[880,880],[920,880],[920,920],[880,920]]]
+        p['operations'][0].update(method='clear_specks',edge_only=False,max_width=1,width_mode='fixed')
+        output,metrics=candidate(im,p,compile_plan(p,im.size));a=np.array(im);b=np.array(output)
+        self.assertEqual(metrics[0]['target_pixels'],1);self.assertEqual(b[10,10,3],0)
+        self.assertEqual(b[90,90,3],255);self.assertTrue(np.array_equal(a[15:81,20:81],b[15:81,20:81]))
     def test_completed_jobs_not_reprocessed(self):
         store,bid,p=self.make();p.run();calls=len(FakeAgent.calls);p.run()
         self.assertEqual(FakeNative.processes,1);self.assertEqual(len(FakeAgent.calls),calls);self.assertEqual(store.jobs(bid)[0]['status'],'passed')
@@ -91,6 +128,7 @@ class BatchTests(unittest.TestCase):
         self.assertEqual(FakeNative.processes,0);self.assertEqual(store.jobs(bid)[0]['status'],'failed')
     def test_pass_requires_flags_and_no_uncertainty(self):
         r=review();r['subject_preserved']=False;self.assertEqual(review_status(r,plan()),'failed')
+        r=review();r['removed_border_is_transparent']=False;self.assertEqual(review_status(r,plan()),'partial')
         p=plan();p['unresolved_notes']=['未知'];self.assertEqual(review_status(review(),p),'partial')
     def test_live_queue_locked_against_retry(self):
         store,bid,p=self.make()

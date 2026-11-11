@@ -32,7 +32,7 @@ class App:
             ttk.Entry(form,textvariable=self.values[key]).grid(row=row,column=1,sticky='ew')
             ttk.Button(form,text='选择',command=lambda k=key:self.browse(k)).grid(row=row,column=2,padx=(8,0))
         flags=ttk.Frame(box);flags.pack(fill='x',pady=6)
-        for key,label in [('mixed','素材与参考混放'),('no_reference_default','无参考时去额外外边框'),('allow_colour_repair','允许局部补色保形')]:ttk.Checkbutton(flags,text=label,variable=self.config[key]).pack(side='left',padx=(0,15))
+        for key,label in [('mixed','素材与参考混放'),('no_reference_default','无参考时去额外外边框'),('allow_colour_repair','允许主体内部局部补色')]:ttk.Checkbutton(flags,text=label,variable=self.config[key]).pack(side='left',padx=(0,15))
         settings_box=ttk.LabelFrame(box,text='运行设置',padding=8);settings_box.pack(fill='x',pady=6);settings_box.columnconfigure(1,weight=1)
         for row,(key,label) in enumerate([('photoshop_exe','Photoshop.exe'),('codex_exe','Codex CLI'),('model','模型（留空使用默认）')]):
             ttk.Label(settings_box,text=label).grid(row=row,column=0,sticky='w',padx=(0,12),pady=3)

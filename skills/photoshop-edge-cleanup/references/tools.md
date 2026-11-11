@@ -4,6 +4,8 @@
 
 ## CLI 回退
 
+外围黑框使用 `mask` / `erase` / 受限路径实际抠透；`paint_fringe`、`paint`、`patch` 只改变颜色或覆盖图层，不能代替此项验收。实体内部的局部修复仍可补色。检查原黑框像素的 alpha，而不只是 PNG 是否存在透明画布。
+
 使用当前 skill 所在目录的 `scripts/ps_tool.py`。在工作区 `photoshop_agent/runtime/pending.json` 写入一个请求，然后执行：
 
 ```powershell
@@ -17,11 +19,11 @@ python -X utf8 '<skill目录>\scripts\ps_tool.py'
 - `{"op":"set_plan","session":"会话ID","reference_path":"参考图绝对路径","reference_observations":["实际看图后的对应关系和判断依据"],"remove_rules":["这张图要去掉的边"],"preserve_rules":["这张图要保留的线和内容"],"remove_regions":[[[0,0],[100,0],[100,100],[0,100]]],"protect_regions":[[[20,20],[80,20],[80,80],[20,80]]],"uncertain_regions":[],"unresolved_notes":[]}`：仅在 revision 0 设置该图方案；返回红色去除/蓝色保护/橙色未解决的预览图。坐标是待编辑原图坐标，参考图只作为语义依据，不直接移植场景图坐标。保护区和未解决区覆盖去除区；允许多个多边形。剩余未解决区需要说明自动复判后仍无法确定的原因。不会等待人工确认。修改方案须从原图新开工作副本。
 - `{"op":"inspect","session":"会话ID","revision":0,"rect":[0,0,300,200],"scale":3,"background":"white","sample_points":[[100,100]]}`：读取指定检查点预览与 RGBA 像素。background 支持 white/gray/dark/checker；省略 revision 为最近版本。缓存预览不反映用户在 PS 中做的外部手动修改，必要时先 snapshot。
 - `{"op":"contract_mask","session":"会话ID","width":8,"feather":0.3,"keep_regions":[[[10,10],[40,10],[40,40],[10,40]]]}`：按像素内缩透明度蒙版，并保留显式指定的细节区域。可能误删细节，执行前必须检查并准备保留区域。
-- `{"op":"paint_fringe","session":"会话ID","width":10,"regions":[[[10,10],[80,10],[80,80],[10,80]]],"colour":[80,35,20],"feather":0.3}`：仅在指定区域与当前外缘带交集补色，修补层剪贴到当前主体，保持主体形状。
+- `{"op":"paint_fringe","session":"会话ID","width":10,"regions":[[[10,10],[80,10],[80,80],[10,80]]],"colour":[80,35,20],"feather":0.3}`：仅修正指定范围内应保留主体侧的色污；该操作不抠除外框，不可作为透明去边完成的依据。
 - `{"op":"paint","session":"会话ID","regions":[...],"colour":[250,235,210],"opacity":100,"feather":0.3}`：在明确的局部选区补色，可使用 path 替代 regions。适合小块残留，不能大范围涂平主体。
 - `{"op":"erase","session":"会话ID","path":[...],"feather":0.2}`：清除明确闭合路径内的区域，可用 regions 替代 path。
 - `{"op":"restore","session":"会话ID","regions":[...]}`：从本会话的原始图层恢复局部内容，可能同时恢复旧黑描边，必须复核。
-- `{"op":"mask","session":"会话ID","mask_path":"全画布灰度PNG"}`：用外部蒙版限制主体透明度。尺寸必须与原画布一致。
+- `{"op":"mask","session":"会话ID","mask_path":"全画布灰度PNG"}`：用乘法蒙版限制主体透明度。0 抠除、255 保持当前透明度；尺寸必须与原画布一致。若目标是降低半透明像素到指定 alpha，使用 target/current 的比例蒙版，不重复乘原 alpha。保留主体区域用 255，不能全局删白。
 - `{"op":"patch","session":"会话ID","patch_path":"全画布RGBA补片PNG","regions":[...]}`：补片会在执行前按显式允许区域裁限透明度。用于相邻纹理延展或精细像素修复。
 - `{"op":"native_defringe","session":"会话ID","width":2,"regions":[...]}`：PS 原生去边，可省略 regions 处理全图；不能把命令成功当作去掉实心描边。
 - `{"op":"undo","session":"会话ID","checkpoint_revision":0}`：从已保存 PSD 恢复工作副本。使用持久检查点，不依赖可能被裁剪或分叉的历史索引。
