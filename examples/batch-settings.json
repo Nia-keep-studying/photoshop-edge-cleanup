@@ -1,0 +1,10 @@
+{
+  "photoshop_exe": "C:\\Program Files\\Adobe\\Adobe Photoshop 2019\\Photoshop.exe",
+  "codex_exe": "codex",
+  "model": "",
+  "max_repairs": 2,
+  "agent_timeout": 600,
+  "no_reference_default": true,
+  "allow_colour_repair": true,
+  "mixed": false
+}

@@ -9,5 +9,9 @@ photoshop_agent/runtime/
 trial_results/
 trial_samples/
 test-output/
+batch-results/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 *.psd
 *.psb

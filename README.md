@@ -1,10 +1,33 @@
 # Photoshop Edge Cleanup
 
-参考图驱动的 Photoshop 去黑边与透明图导出 **Codex Skill**。
+参考图驱动的 Photoshop 去黑边与透明图导出：**Codex Skill + Windows 本地批处理工具**。
 
 Codex 对照参考图判断哪些轮廓需要去除、哪些属于设计本身；本地脚本将修改限制在指定区域，由 Photoshop 保存透明 PNG 和 PSD 检查点，最后逐图查看结果并记录残留或误删。
 
-适合指示牌、钥匙扣、卡通挂牌等平面 PNG 素材。它是一个需要 Codex 看图判断的工作流，不是独立运行就能理解参考图的批量分类器，也不是 UXP 插件。
+适合指示牌、钥匙扣、卡通挂牌等平面素材。批处理工具通过已登录的 Codex CLI 分析图片，用固定的本地工具修补，再调用 Photoshop 保存 PNG / PSD；它不是 UXP 插件。
+
+## 一键批处理（第一版）
+
+使用 Python 3.12 创建本地环境并安装依赖：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+先确认 Codex CLI 已安装并完成 `codex login`，然后双击 `start_windows.bat`。界面会尝试查找 Codex CLI；找不到时手动选择 `codex.exe`，并选择已安装的 `Photoshop.exe`。
+
+1. 选择素材、参考和结果文件夹。参考可以为空；混合目录则勾选“素材与参考混放”，参考文件夹留空。
+2. 点击“导入并开始”。自动配对参考、制定范围、预览检查、PS 执行、独立验收，最多从原图补修两轮。
+3. 查看“自动初检通过 / 部分完成 / 异常”。双击图片行打开 PNG 对比图；结果同时包含透明 PNG、PSD 和判断记录。
+
+“暂停”在当前图片结束后生效；重新打开工具后，选择原结果目录，载入批次并继续。相同输入和设置重复导入不会重做已完成图片。“重试异常”只重新处理部分完成和失败项，旧记录归档保留。更换模型、PS 路径或默认规则后，重新导入会创建新批次。
+
+输出目录必须与输入目录分开。素材会复制到批次内，原图不覆盖。图片和参考会发送给所选 Codex 服务进行视觉判断；使用当前 Codex 登录账户的额度。不要在日志中填写密钥。
+
+完整配置、目录结构、恢复行为和限制见 [批处理说明](docs/batch-workflow.md)。
+
+首版已通过 23 项离线检查，并用三组旧样本运行真实 Codex + Photoshop 流程：最终 2 张模型初检通过、1 张部分完成。包含开发修正和一次异常重试，详见 [验证记录](docs/validation-2026-11-11.md)，不代表新图一次成功率。
 
 ## 能做什么
 
@@ -19,11 +42,11 @@ Codex 对照参考图判断哪些轮廓需要去除、哪些属于设计本身�
 ## 环境
 
 - Windows 桌面与已安装、可正常启动的 Photoshop。
-- Python 3.10 或更高版本，以及 Pillow。
+- 批处理工具需要 Python 3.12 或更高版本（已在 3.12 验证）；依赖见 requirements.txt。独立 skill 执行器只需要 Pillow。
 - Photoshop **20.0.4 / CC 2019** 已实际验证；其他版本需要先测试 JSX 入口。
 - 使用 skill 的 Codex 需要能够查看本地图片并执行本地 Python 脚本。
 
-脚本自身不需要 OpenAI SDK 或 API 密钥；图像语义判断由运行 skill 的 Codex 提供。
+脚本自身不需要 OpenAI SDK 或 API 密钥；交互 skill 使用当前 Codex，批处理使用本机 Codex CLI 的已登录账户。
 
 ## 安装
 
