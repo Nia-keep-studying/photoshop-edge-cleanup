@@ -11,7 +11,7 @@ from edge_batch.codex import visual_input
 
 POLY=[[0,0],[1000,0],[1000,1000],[0,1000]]
 def plan():
-    return dict(title='测试挂牌',kind='trim',reference_matches=True,is_flat_artwork=True,remove_white_background=False,
+    return dict(title='测试挂牌',kind='trim',reference_matches=True,reference_mode='flat_artwork',is_flat_artwork=True,remove_white_background=False,
                 edge_policy='transparent_remove',
                 allow_edge_touching=False,frame_barriers=[],coordinate_system='normalized_1000',reference_observations=['无参考'],
                 remove_rules=['去额外外围黑线'],preserve_rules=['保留内部字'],protect_regions=[],uncertain_regions=[],unresolved_notes=[],
@@ -74,6 +74,20 @@ class BatchTests(unittest.TestCase):
         with self.assertRaises(ValueError):compile_plan(p,(100,100))
         p=plan();p.pop('edge_policy')
         with self.assertRaises(ValueError):compile_plan(p,(100,100))
+
+    def test_export_ignores_unused_region_annotations(self):
+        p=plan();p['kind']='export';p['operations']=[]
+        p['protect_regions']=[[[0,0],[1000,1000]]]
+        p['uncertain_regions']=[[[0,0],[1000,1000]]]
+        p['unresolved_notes']=[]
+        compiled=compile_plan(p,(100,100))
+        self.assertEqual(compiled['protect_regions'],[])
+        self.assertEqual(compiled['uncertain_regions'],[])
+
+    def test_small_polygon_overshoot_is_clipped_to_canvas(self):
+        p=plan();p['operations'][0]['regions']=[[[0,405],[1080,410],[1000,680]]]
+        compiled=compile_plan(p,(100,100))
+        self.assertEqual(compiled['operations'][0]['regions'][0][1],[99,41])
     def test_nearby_disconnected_black_details_stay_opaque(self):
         im=Image.new('RGBA',(80,80));d=ImageDraw.Draw(im)
         d.rectangle((5,5,74,74),fill='white',outline='black',width=2);d.rectangle((10,20,11,40),fill='black')

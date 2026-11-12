@@ -18,7 +18,8 @@ OPERATION=obj({'method':{'type':'string','enum':['erase_edge','clear_specks','lo
                'edge_only':BOOL,'reason':STRING})
 PLAN=obj({'title':STRING,'kind':{'type':'string','enum':['trim','export','unsupported']},
           'edge_policy':{'type':'string','enum':['transparent_remove']},
-          'reference_matches':BOOL,'is_flat_artwork':BOOL,'remove_white_background':BOOL,
+          'reference_matches':BOOL,'reference_mode':{'type':'string','enum':['flat_artwork','scene_product','none']},
+          'is_flat_artwork':BOOL,'remove_white_background':BOOL,
           'allow_edge_touching':BOOL,'frame_barriers':array(obj({'edge':{'type':'string','enum':['left','right','top','bottom']},'start':INTEGER,'end':INTEGER})),
           'coordinate_system':{'type':'string','enum':['normalized_1000']},
           'reference_observations':TEXTS,'remove_rules':TEXTS,'preserve_rules':TEXTS,

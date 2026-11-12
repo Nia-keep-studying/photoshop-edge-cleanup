@@ -83,12 +83,15 @@ width_mode=auto 会从接触外缘的暗线估计宽度，max_width 是上限（
 每个操作都有 regions；不要因为所有素材常见黑线就全图处理。仅当整个外围都该去边且内部安全时使用全画布 polygon。
 local_fill 的同材质 donor_regions 应包含多个有代表性的清洁区域，不能跨材料取色。
 protect_regions 为参考明确要保留且靠近修补区的人物、文字或设计轮廓；不要用宽泛矩形遮住待清理的牌边。
+reference_mode 必须填写：flat_artwork 表示参考本身也是同一设计的平面展开图；scene_product 表示参考是同一设计的场景/实物照片；none 表示没有可用参考。场景参考仍可用于判断哪些元素属于同一设计、哪些黑边是应保留内容，但不得把透视、挂绳、挂钩、投影、遮挡或场景坐标直接当作平面素材区域。
+当场景参考与输入在图案、文字、颜色或轮廓上能确认是同一设计时，reference_mode=scene_product，reference_matches=true；只有完全不对应时才 reference_matches=false。若无法确认，用 reference_mode=scene_product 并在 reference_observations 或 unresolved_notes 写明不确定位置。
 is_flat_artwork 必须根据输入判断。pixel_facts 提供实际 alpha 和画布边缘亮度，不要把印在 RGB 上的棋盘格看成真实透明。
 remove_white_background 的工具实际是“与画布外缘连通的浅色背景分离”：RGB 各通道都 >=235 的白色或浅灰色棋盘格均可分离，封闭主体内的白色保留。因此浅棋盘格也应启用，不必判 unsupported。
 alpha_min>=128 表示缺少可用透明背景；平面素材有白色/浅灰棋盘背景时启用 remove_white_background。已有真实 alpha 不必启用。
 工具要求 frame_light_fraction>=0.985；若主体接触画布且视觉上仍为平面浅背景，allow_edge_touching=true 放宽到>=0.80。不要把深色棋盘格或场景图强当浅背景。
 贴画被画布裁开时，在原始像素坐标 frame_barriers 封住已确认的白切边缺口（仅该字段使用原像素）。
 无额外描边时 kind=export、operations=[]。无法安全判断时用 uncertain_regions 与 unresolved_notes，或 kind=unsupported；不要硬猜。
+kind=export 且 operations=[] 时不需要 protect_regions 或 uncertain_regions，三者都返回空数组；此类任务只做背景分离和透明 PNG 导出。不要为了说明“无修改”生成只有两点的伪多边形。
 即使只导出，reference_observations、remove_rules、preserve_rules 也必须各有至少一句说明，可写“本图不去边”。
 所有 operations 字段必须填写。edge_only 的用途是选择 alpha 外缘限制。内部子图形描边接实体底板时可用小范围 local_fill；外框残点继续抠透，不能用补白兜底。
 返回的是从原图重新处理的完整方案；补修时保留上轮已正确规则，禁止基于误删图继续扩大误删。

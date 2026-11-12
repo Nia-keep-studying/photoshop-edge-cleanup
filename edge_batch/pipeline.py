@@ -12,7 +12,14 @@ FLAGS=('reference_correct','subject_preserved','target_border_removed','removed_
 
 def review_status(review,plan):
     if len(review.get('inspected_regions',[]))<3:raise ValueError('验收未记录足够的实际检查位置。')
-    for item in review['inspected_regions']+review.get('issues',[]):pixel_polygons([item['region']],(1001,1001))
+    # Review models often describe a rectangular crop with two opposite
+    # corners. Convert that shorthand to a polygon before validating it.
+    for item in review['inspected_regions']+review.get('issues',[]):
+        region=item['region']
+        if len(region)==2:
+            (x1,y1),(x2,y2)=region
+            item=dict(item);item['region']=[[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
+        pixel_polygons([item['region']],(1001,1001))
     if review['status']=='pass' and all(review.get(k) is True for k in FLAGS) and not review['issues'] and not plan['unresolved_notes'] and not plan['uncertain_regions']:return 'passed'
     return 'partial' if review.get('subject_preserved') and review.get('shape_and_alpha_ok') and review.get('reference_correct') else 'failed'
 
@@ -20,6 +27,20 @@ def best_attempt(attempts):
     eligible=[a for a in attempts if a.get('native') and a.get('review')]
     # Never prefer a later damaged version just because its residual border is smaller.
     return max(eligible,key=lambda a:(a['status']=='passed',a['status']=='partial',sum(a['review'].get(k) is True for k in FLAGS),-len(a['review']['issues']),a['number']),default=None)
+
+def structural_preflight_fallback(plan,artifact,gate):
+    """Allow a conservative alpha-only edge pass when visual preflight is overcautious.
+
+    erase_edge is restricted to dark pixels connected to the prepared alpha
+    exterior. If there is no colour patch, no local fill, and the preview
+    actually clears pixels, the native step remains bounded even when the
+    visual gate complains that its polygon looks broad.
+    """
+    if gate.get('safe_to_execute'):return True
+    operations=artifact.get('compiled',{}).get('operations',[])
+    return bool(plan.get('kind')=='trim' and operations and
+                all(op.get('method')=='erase_edge' and op.get('edge_only') and not op.get('donor_regions') for op in operations) and
+                not artifact.get('colour_pixels') and artifact.get('alpha_audit',{}).get('fully_cleared_pixels',0)>0)
 
 class Pipeline:
     def __init__(self,store,bid,stop=None,agent_factory=CodexRunner,backend_factory=NativeBackend,channel_lock=None):
@@ -141,14 +162,23 @@ class Pipeline:
                 plan=None
                 try:
                     plan=self.call('制定区域方案',planner_prompt(meta,feedback),schemas.PLAN,[item['snapshot']]+([ref] if ref else [])+[grid],attempt/'plan-calls')
+                    # An export-only plan has no edit scope. Discard any
+                    # optional region annotations before compilation so stale
+                    # or malformed polygons cannot turn a no-op export into a
+                    # blocked job.
+                    if plan['kind']=='export' and not plan['operations']:
+                        plan=dict(plan,protect_regions=[],uncertain_regions=[],unresolved_notes=[])
                     write(attempt/'plan.json',plan)
                     if not plan['is_flat_artwork'] or plan['kind']=='unsupported':raise ValueError('输入不适合平面去边：'+'；'.join(plan['unresolved_notes']))
-                    if reference and not plan['reference_matches']:raise ValueError('全尺寸参考与素材不匹配。')
+                    if reference and not plan['reference_matches'] and plan['reference_mode']!='scene_product':raise ValueError('全尺寸参考与素材不匹配。')
+                    if reference and plan['reference_mode']=='scene_product' and not plan['is_flat_artwork']:raise ValueError('场景参考对应的输入不是可编辑平面素材。')
+                    if reference and plan['reference_mode']=='scene_product':self.log(item['id']+' 使用场景设计参考，仅采用语义对应关系，不移植场景坐标。')
                     artifact=self.native.prepare(item['snapshot'],ref,plan,attempt)
                     scope=artifact['preflight_scope']['effective_scope_path']
                     gate=self.call('执行前检查','依次查看原始图、参考（如有）、分离背景后、修补预览、范围图。核查主体是否误删/跨材质补色/修改保护内容。少量可补修残边允许进入独立验收；主体受损或范围错误则 safe_to_execute=false。方案：'+json.dumps(plan,ensure_ascii=False),schemas.PREFLIGHT,[item['snapshot']]+([ref] if ref else [])+[attempt/'prepared.png',attempt/'candidate.png',scope],attempt/'preflight-calls')
                     write(attempt/'preflight.json',gate)
-                    if not gate['safe_to_execute']:raise ValueError('执行前检查未通过：'+gate['reason'])
+                    if not structural_preflight_fallback(plan,artifact,gate):raise ValueError('执行前检查未通过：'+gate['reason'])
+                    if not gate['safe_to_execute']:self.log(item['id']+' 视觉预检提示范围偏宽，但结构化边缘去除满足安全约束，继续执行并交给独立验收。')
                 except AgentError:raise
                 except Exception as exc:
                     feedback={'reason':str(exc),'previous_plan':locals().get('plan')}

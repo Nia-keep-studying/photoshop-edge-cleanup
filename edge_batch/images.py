@@ -59,8 +59,11 @@ def pixel_polygons(polys,size):
         if not isinstance(poly,list) or not 3<=len(poly)<=150:raise ValueError('区域需要 3 到 150 个顶点。')
         points=[]
         for p in poly:
-            if not isinstance(p,list) or len(p)!=2 or any(type(v) not in (int,float) or not math.isfinite(v) or not 0<=v<=1000 for v in p):raise ValueError('区域坐标必须为有限的 0..1000 数字。')
-            points.append([min(w-1,round(p[0]*w/1000)),min(h-1,round(p[1]*h/1000))])
+            if not isinstance(p,list) or len(p)!=2 or any(type(v) not in (int,float) or not math.isfinite(v) or not -100<=v<=1100 for v in p):raise ValueError('区域坐标必须为有限的 0..1000 数字，允许小幅越界后裁到画布。')
+            # Vision models occasionally place a boundary point a few pixels
+            # beyond the normalized canvas. Treat that as an off-canvas point
+            # and clip it; reject large excursions instead of expanding scope.
+            points.append([min(w-1,max(0,round(p[0]*w/1000))),min(h-1,max(0,round(p[1]*h/1000)))])
         out.append(points)
     return out
 
@@ -79,7 +82,13 @@ def compile_plan(plan,size,allow_colour=True):
     if not isinstance(operations,list) or len(operations)>16:raise ValueError('每次最多 16 个固定修补操作。')
     if plan['kind']=='export' and operations:raise ValueError('透明导出方案不能包含去边操作。')
     if plan['kind']=='trim' and not operations and not plan['uncertain_regions']:raise ValueError('去边方案没有可执行操作。')
-    protect=pixel_polygons(plan['protect_regions'],size);uncertain=pixel_polygons(plan['uncertain_regions'],size)
+    # Export-only jobs do not execute any region operation. Ignore optional
+    # annotations from the visual planner so a malformed unused polygon cannot
+    # block a safe background separation and transparent export.
+    if plan['kind']=='export' and not operations:
+        protect=[];uncertain=[]
+    else:
+        protect=pixel_polygons(plan['protect_regions'],size);uncertain=pixel_polygons(plan['uncertain_regions'],size)
     if uncertain and not plan['unresolved_notes']:raise ValueError('未解决区域缺少原因。')
     compiled=[];remove=[]
     for operation in operations:
