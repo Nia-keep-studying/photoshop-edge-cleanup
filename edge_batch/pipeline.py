@@ -135,6 +135,7 @@ class Pipeline:
     def load_attempts(self,folder):
         return [read(p) for p in sorted(Path(folder).glob('attempt-*/record.json'))]
     def process_job(self,job):
+        image_started=time.perf_counter()
         item=self.items[job['source_id']];folder=self.folder/'jobs'/item['id'];folder.mkdir(parents=True,exist_ok=True)
         self.store.update(job['id'],status='matching');reference=self.match(item,folder)
         self.store.update(job['id'],reference_id=reference['id'] if reference else None)
@@ -192,15 +193,18 @@ class Pipeline:
             images=review_images(native['before'],native['png'],attempt,artifact['compiled'])
             review=self.call('独立验收',review_prompt(dict(meta,plan=plan,round=number,remaining_repairs=self.settings['max_repairs']-number,pixel_audit=native)),schemas.REVIEW,[item['snapshot']]+([ref] if ref else [])+images,attempt/'review-calls')
             status=review_status(review,plan);record={'number':number,'status':status,'plan':plan,'native':native,'review':review,'reference':ref}
+            record['timing']={'attempt_seconds':round(time.perf_counter()-image_started,3)}
             write(attempt/'record.json',record);attempts.append(record)
             self.log(item['id']+' 第 '+str(number+1)+' 轮：'+status+'；'+review['reason'])
             if status=='passed':break
             feedback=dict(review,previous_plan=plan)
-        self.deliver(job,item,ref,attempts)
-    def deliver(self,job,item,reference,attempts,error=''):
+        self.deliver(job,item,ref,attempts,timing={'total_seconds':round(time.perf_counter()-image_started,3)})
+    def deliver(self,job,item,reference,attempts,error='',timing=None):
         best=best_attempt(attempts);status=best['status'] if best else 'failed'
         dest=self.folder/'delivery'/status/item['id'];dest.mkdir(parents=True,exist_ok=True)
         result={'attempts':len(attempts),'status':status,'review_type':'模型视觉初检，未经人工验收','error':error}
+        if timing:result['timing']=timing
+        elif best and best.get('timing'):result['timing']={'total_seconds':best['timing'].get('attempt_seconds')}
         if best:
             if status!='passed' and not result['error']:result['error']=best['review']['reason']
             result.update(selected_attempt=best['number'],review=best['review'],plan=best['plan'])
