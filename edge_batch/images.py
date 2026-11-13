@@ -133,13 +133,15 @@ def candidate(prepared,plan,compiled,simple_black_edge=False,simple_max_width=No
                 # temporary background. Only dark pixels exposed through that
                 # halo are eligible, so internal lines on a character or
                 # letter remain enclosed and opaque.
+                conn=np.ones((3,3),dtype=bool)
                 nearwhite=(rgb.min(2)>=245)&core
                 background=(~core)|nearwhite
                 seed=background.copy();seed[1:-1,1:-1]=False
-                background=ndi.binary_propagation(seed,mask=background)
-                exposed=dark & ndi.binary_dilation(background,iterations=1)
-                eligible=ndi.binary_propagation(exposed,mask=dark)
-                eligible &= ndi.distance_transform_edt(~background)<=width
+                background=ndi.binary_propagation(seed,mask=background,structure=conn)
+                outer_depth=ndi.distance_transform_edt(~background)
+                exposed=dark & ndi.binary_dilation(background,structure=conn,iterations=1)
+                eligible=ndi.binary_propagation(exposed,mask=dark,structure=conn)
+                eligible &= outer_depth<=width
                 note='simple_exposed_outer_edge'
             else:
                 # Delete only dark pixels connected to the actual exterior,
@@ -147,6 +149,62 @@ def candidate(prepared,plan,compiled,simple_black_edge=False,simple_max_width=No
                 # stays intact.
                 eligible=ndi.binary_propagation(eligible&(depth<=2),mask=eligible)
             count=int(eligible.sum());out[eligible,3]=0
+            if simple_black_edge:
+                # Removing the outer contour can expose a handful of dark
+                # antialias pixels that were one pixel behind it. Clear only
+                # the newly boundary-adjacent pixels for four passes; this
+                # closes visible pinholes without sweeping through enclosed
+                # character or lettering details.
+                removed=eligible.copy()
+                exterior_seed=(~core).copy();exterior_seed[1:-1,1:-1]=False
+                exterior=ndi.binary_propagation(exterior_seed,mask=~core,structure=conn)
+                residual_total=0
+                for _ in range(4):
+                    remaining=out[:,:,3]>0
+                    # Follow only the already confirmed outer contour. A
+                    # near-white bridge may be crossed for at most two pixels
+                    # before looking for the next dark antialias fragment;
+                    # unrelated internal holes cannot seed this search.
+                    halo_distance=ndi.distance_transform_edt(~removed)
+                    halo=nearwhite&remaining&(halo_distance<=2)
+                    frontier=removed|halo
+                    residual=dark & area & ~protected & remaining
+                    residual &= outer_depth<=width+8
+                    residual &= ndi.binary_dilation(frontier,structure=conn)
+                    n=int(residual.sum())
+                    if not n:break
+                    out[residual,3]=0;removed|=residual;residual_total+=n
+                if residual_total:
+                    count+=residual_total
+                    note+=';frontier_passes=4;residual_pixels='+str(residual_total)
+                # Finally remove small dark spurs that the frontier has
+                # exposed at a contour junction. The component must touch the
+                # same exterior frontier and have a finite outer-depth
+                # distance; enclosed hole rings are excluded.
+                spur_total=0
+                for _ in range(2):
+                    remaining=out[:,:,3]>0
+                    residual_dark=(rgb.max(2)<245)&(spread<=op['chroma_limit'])&area&remaining
+                    labels,label_count=ndi.label(residual_dark,structure=conn)
+                    if not label_count:break
+                    sizes=np.bincount(labels.ravel(),minlength=label_count+1)
+                    near_boundary=ndi.distance_transform_edt(remaining)<=4
+                    touched=np.bincount(labels.ravel(),weights=near_boundary.ravel(),minlength=label_count+1)>0
+                    external_mask=exterior|removed|((rgb.min(2)>=245)&remaining)
+                    external_seed=external_mask.copy();external_seed[1:-1,1:-1]=False
+                    external=ndi.binary_propagation(external_seed,mask=external_mask,structure=conn)
+                    frontier=ndi.binary_dilation(external,structure=conn)
+                    touches_external=np.bincount(labels.ravel(),weights=frontier.ravel(),minlength=label_count+1)>0
+                    component_min_outer=np.full(label_count+1,np.inf,dtype='float32')
+                    np.minimum.at(component_min_outer,labels.ravel(),outer_depth.ravel())
+                    small=(sizes<=100)&touched&touches_external&(component_min_outer<=width+12)
+                    purge=residual_dark&small[labels]&~protected
+                    n=int(purge.sum())
+                    if not n:break
+                    out[purge,3]=0;removed|=purge;spur_total+=n
+                if spur_total:
+                    count+=spur_total
+                    note+=';small_exterior_spur_passes=2;spur_pixels='+str(spur_total)
         elif op['method']=='clear_specks':
             labels,_=ndi.label(out[:,:,3]>0,structure=np.ones((3,3)))
             sizes=np.bincount(labels.ravel());sizes[0]=0
