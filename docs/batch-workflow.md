@@ -22,7 +22,7 @@
 
 每张图片都从原始快照重新生成修补方案，不在误删结果上继续收缩。后续版本变差时，交付此前独立初检较好的版本。仍有残边、误删、参考疑点或未解决区域时不标记通过。无需逐图等待人工圈选。
 
-对于“只需要去掉外围黑边”的固定素材，可将 `simple_black_edge` 设为 `true`。此模式跳过参考匹配和复杂方案判断，直接在实际 alpha 外缘的暗色带内生成透明蒙版，再让 Photoshop 执行并导出。`simple_max_width` 默认 24，可针对厚黑边提高到 40 或 48；该模式只适用于黑边本身就是待删除内容的图片，不应与需要保留设计黑框的图片混用。
+对于“只需要去掉外围黑边”的固定素材，可将 `simple_black_edge` 设为 `true`。此模式跳过参考匹配和复杂方案判断，先把与透明背景连通的白色描边当作临时背景，只删除被这层背景暴露出来的黑色外缘，再让 Photoshop 执行并导出。`simple_max_width` 默认 8，可针对较厚的抗锯齿边缘提高到 12；该模式只适用于黑边本身就是待删除内容的图片，不应与需要保留设计黑框的图片混用。
 
 每张交付结果的 `report.json` 会记录 `timing.total_seconds`；每轮方案记录的 `record.json` 会记录累计 `timing.attempt_seconds`，便于比较背景分离、蒙版计算、Photoshop 执行和验收的实际耗时。
 
@@ -77,4 +77,4 @@ Codex 调用日志保存在每个 `call-...` 文件夹，`usage.json` 记录耗�
 
 CLI 接入采用官方的 [非交互模式](https://learn.chatgpt.com/docs/non-interactive-mode)：`codex exec` 接收图片、返回 JSON Schema 约束结果。已验证 CLI `0.167.0-alpha.3.2`；升级后若参数变化，应先用小批次复测。工具使用只读沙箱且不加载用户项目配置，沿用本机登录凭据，不自动创建 API 密钥。
 
-离线回归：`.\.venv\Scripts\python.exe -m unittest discover -s tests -v`。其中队列测试使用替身，不代表真实 Photoshop 或模型质量测试。\n
+离线回归：`.\.venv\Scripts\python.exe -m unittest discover -s tests -v`。其中队列测试使用替身，不代表真实 Photoshop 或模型质量测试。

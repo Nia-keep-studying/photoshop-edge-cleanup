@@ -129,12 +129,18 @@ def candidate(prepared,plan,compiled,simple_black_edge=False,simple_max_width=No
         count=int(eligible.sum());note=''
         if op['method']=='erase_edge':
             if simple_black_edge:
-                # The simple preset is intentionally more aggressive: all
-                # dark pixels in the configured outer alpha band are treated
-                # as border pixels. It is only enabled for images explicitly
-                # classified as "simple black edge"; interior content outside
-                # the band remains untouched.
-                note='simple_outer_band'
+                # Treat an exterior-connected near-white sticker halo as a
+                # temporary background. Only dark pixels exposed through that
+                # halo are eligible, so internal lines on a character or
+                # letter remain enclosed and opaque.
+                nearwhite=(rgb.min(2)>=245)&core
+                background=(~core)|nearwhite
+                seed=background.copy();seed[1:-1,1:-1]=False
+                background=ndi.binary_propagation(seed,mask=background)
+                exposed=dark & ndi.binary_dilation(background,iterations=1)
+                eligible=ndi.binary_propagation(exposed,mask=dark)
+                eligible &= ndi.distance_transform_edt(~background)<=width
+                note='simple_exposed_outer_edge'
             else:
                 # Delete only dark pixels connected to the actual exterior,
                 # within the authorized band. Disconnected nearby lettering

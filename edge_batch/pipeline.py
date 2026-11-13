@@ -105,7 +105,7 @@ class Pipeline:
     def simple_plan(self,item):
         facts=image_facts(item['snapshot'])
         remove_white=bool(facts['alpha_min']>=128 and facts['frame_light_fraction']>=0.985)
-        width=min(64,max(1,int(self.settings.get('simple_max_width',24))))
+        width=min(64,max(1,int(self.settings.get('simple_max_width',8))))
         dark=int(self.settings.get('simple_dark_threshold',235));chroma=int(self.settings.get('simple_chroma_limit',80))
         return {'title':'简化黑边清理 · '+item['relative'],'kind':'trim','edge_policy':'transparent_remove',
                 'reference_matches':False,'reference_mode':'none','is_flat_artwork':True,
