@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 SKILL=ROOT/'skills/photoshop-edge-cleanup'
-VERSION='batch-v3-transparent-edge-reference'
+VERSION='batch-v3.1-targeted-edge'
 TERMINAL={'passed','partial','failed'}
 
 def read(path):return json.loads(Path(path).read_text(encoding='utf-8-sig'))

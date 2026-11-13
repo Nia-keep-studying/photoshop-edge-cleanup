@@ -142,6 +142,7 @@ class Pipeline:
         meta={'source':{k:item[k] for k in ('id','relative','size','mode')},'reference':reference['relative'] if reference else None,
               'pixel_facts':image_facts(item['snapshot']),
               'no_reference_default':self.settings['no_reference_default'],'allow_colour_repair':self.settings['allow_colour_repair'],
+              'targeted_guidance':self.settings.get('per_image_guidance',{}).get(item['relative'],''),
               'acceptance':'没有多余黑边；不误删主体；有意设计线条保留。'}
         grid=folder/'source_coordinates.png';coordinate_preview(item['snapshot'],grid)
         attempts=self.load_attempts(folder);feedback=None

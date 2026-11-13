@@ -74,7 +74,7 @@ def planner_prompt(metadata,feedback=None):
     return '''根据原始平面图及对应参考，给出一个可执行的保守方案。以下 skill 是视觉规则，实际执行由宿主程序负责；不要调用其中的脚本。
 '''+guidance+'''
 固定工具能力：
-- erase_edge：仅在允许区域、实际 alpha 外缘带内，将与外缘连通的目标暗线 alpha 置零，RGB 不改。必须 edge_only=true、donor_regions=[]。白板黑框可从 dark_threshold=235、chroma_limit=45 开始；彩色混边按实际颜色调整。colour=[0,0,0]、donor_tolerance=0（本工具不使用这两字段）。
+- erase_edge：仅在允许区域、实际 alpha 外缘带内，将与外缘连通的目标暗线 alpha 置零，RGB 不改。必须 edge_only=true、donor_regions=[]。白板黑框可从 dark_threshold=235、chroma_limit=45 开始；抗锯齿后的棕灰残边可在窄区域内提高到 dark_threshold=245、chroma_limit=140，但不要把高阈值扩展到文字、人物或整块牌面。彩色混边按实际颜色调整。colour=[0,0,0]、donor_tolerance=0（本工具不使用这两字段）。
 - clear_specks：去边后仅清理指定区域内、与主体断开的不超过8个原始像素的背景孤立分量，最大主体和保护区不动，不侵蚀主轮廓。用于背景分离留下的白色细点；只有确认这些小岛不是图案/标点时使用。edge_only=false、donor_regions=[]、colour=[0,0,0]、max_width=1、width_mode=fixed，其余阈值填0（不使用）。必须放在 erase_edge 之后。
 - local_fill：只用于主体内部、确认仍属于实体底板的子图形边界。不能用于外围去边，触及实际 alpha 外缘会被拒绝。donor_regions 非空时用同材质邻近取色，否则用 colour。保护人物接点。
 - contract：改变该局部透明蒙版，仅在能准确限定多余边框宽度且不会损伤主体时使用；优先 erase_edge，不能盲目整体收缩。
@@ -85,6 +85,7 @@ local_fill 的同材质 donor_regions 应包含多个有代表性的清洁区域
 protect_regions 为参考明确要保留且靠近修补区的人物、文字或设计轮廓；不要用宽泛矩形遮住待清理的牌边。
 reference_mode 必须填写：flat_artwork 表示参考本身也是同一设计的平面展开图；scene_product 表示参考是同一设计的场景/实物照片；none 表示没有可用参考。场景参考仍可用于判断哪些元素属于同一设计、哪些黑边是应保留内容，但不得把透视、挂绳、挂钩、投影、遮挡或场景坐标直接当作平面素材区域。
 当场景参考与输入在图案、文字、颜色或轮廓上能确认是同一设计时，reference_mode=scene_product，reference_matches=true；只有完全不对应时才 reference_matches=false。若无法确认，用 reference_mode=scene_product 并在 reference_observations 或 unresolved_notes 写明不确定位置。
+先判断深色外轮廓是设计线还是附加黑边：如果深色线完整、均匀地跟随成品轮廓，并在场景参考中也作为图案边界出现，应保留并使用 kind=export、operations=[]；只有能看出它位于实体牌面之外、是独立偏移的外框或光晕时，才使用 trim。猫耳、卡通人物和牌体共用一圈完整设计线时，不能因为颜色深就自动抠除。
 is_flat_artwork 必须根据输入判断。pixel_facts 提供实际 alpha 和画布边缘亮度，不要把印在 RGB 上的棋盘格看成真实透明。
 remove_white_background 的工具实际是“与画布外缘连通的浅色背景分离”：RGB 各通道都 >=235 的白色或浅灰色棋盘格均可分离，封闭主体内的白色保留。因此浅棋盘格也应启用，不必判 unsupported。
 alpha_min>=128 表示缺少可用透明背景；平面素材有白色/浅灰棋盘背景时启用 remove_white_background。已有真实 alpha 不必启用。
@@ -94,8 +95,8 @@ alpha_min>=128 表示缺少可用透明背景；平面素材有白色/浅灰棋�
 kind=export 且 operations=[] 时不需要 protect_regions 或 uncertain_regions，三者都返回空数组；此类任务只做背景分离和透明 PNG 导出。不要为了说明“无修改”生成只有两点的伪多边形。
 即使只导出，reference_observations、remove_rules、preserve_rules 也必须各有至少一句说明，可写“本图不去边”。
 所有 operations 字段必须填写。edge_only 的用途是选择 alpha 外缘限制。内部子图形描边接实体底板时可用小范围 local_fill；外框残点继续抠透，不能用补白兜底。
-返回的是从原图重新处理的完整方案；补修时保留上轮已正确规则，禁止基于误删图继续扩大误删。
-数据：'''+json.dumps(metadata,ensure_ascii=False)+'\n上轮独立验收问题（若有）：'+json.dumps(feedback,ensure_ascii=False)
+返回的是从原图重新处理的完整方案；补修时保留上轮已正确规则，禁止基于误删图继续扩大误删。若上轮验收指出残边，优先在问题框对应的实体外缘增加 1..4 像素窄带 erase_edge，必要时将 dark_threshold 提到 245、chroma_limit 提到 140；不要把原有多边形整体向主体内部扩张。若上轮验收确认黑边属于设计轮廓，则改为 export-only，从原图重新导出，不继续抠除。
+本次任务的额外定向要求（优先级高于默认启发式，仅适用于本图）：'''+(metadata.get('targeted_guidance') or '无')+'''\n数据：'''+json.dumps(metadata,ensure_ascii=False)+'\n上轮独立验收问题（若有）：'+json.dumps(feedback,ensure_ascii=False)
 
 def review_prompt(metadata):
     return '''你是独立验收步骤，未参与本图处理。查看原图、参考图、实际 PS 输出在白/灰/深底上的展示及沿轮廓分块的放大图。
