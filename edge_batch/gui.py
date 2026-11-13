@@ -32,12 +32,12 @@ class App:
             ttk.Entry(form,textvariable=self.values[key]).grid(row=row,column=1,sticky='ew')
             ttk.Button(form,text='选择',command=lambda k=key:self.browse(k)).grid(row=row,column=2,padx=(8,0))
         flags=ttk.Frame(box);flags.pack(fill='x',pady=6)
-        for key,label in [('mixed','素材与参考混放'),('no_reference_default','无参考时去额外外边框'),('allow_colour_repair','允许主体内部局部补色')]:ttk.Checkbutton(flags,text=label,variable=self.config[key]).pack(side='left',padx=(0,15))
+        for key,label in [('simple_black_edge','简化黑边模式'),('mixed','素材与参考混放'),('no_reference_default','无参考时去额外外边框'),('allow_colour_repair','允许主体内部局部补色')]:ttk.Checkbutton(flags,text=label,variable=self.config[key]).pack(side='left',padx=(0,15))
         settings_box=ttk.LabelFrame(box,text='运行设置',padding=8);settings_box.pack(fill='x',pady=6);settings_box.columnconfigure(1,weight=1)
-        for row,(key,label) in enumerate([('photoshop_exe','Photoshop.exe'),('codex_exe','Codex CLI'),('model','模型（留空使用默认）')]):
+        for row,(key,label) in enumerate([('photoshop_exe','Photoshop.exe'),('codex_exe','Codex CLI'),('model','模型（留空使用默认）'),('simple_max_width','简化模式最大黑边宽度')]):
             ttk.Label(settings_box,text=label).grid(row=row,column=0,sticky='w',padx=(0,12),pady=3)
             ttk.Entry(settings_box,textvariable=self.config[key]).grid(row=row,column=1,sticky='ew')
-            if key!='model':ttk.Button(settings_box,text='选择',command=lambda k=key:self.browse_exe(k)).grid(row=row,column=2,padx=(8,0))
+            if key in ('photoshop_exe','codex_exe'):ttk.Button(settings_box,text='选择',command=lambda k=key:self.browse_exe(k)).grid(row=row,column=2,padx=(8,0))
         bar=ttk.Frame(box);bar.pack(fill='x',pady=8);self.buttons=[]
         for label,fn in [('导入并开始',self.start),('载入已有批次',self.load),('继续选中批次',self.resume),('重试异常',self.retry)]:
             button=ttk.Button(bar,text=label,command=fn);button.pack(side='left',padx=(0,8));self.buttons.append(button)
@@ -58,7 +58,8 @@ class App:
         if value:self.config[key].set(value)
     def settings(self):
         result={k:v.get() for k,v in self.config.items()}
-        for k in ('max_repairs','agent_timeout'):result[k]=int(result[k])
+        for k in ('max_repairs','agent_timeout','simple_max_width','simple_dark_threshold','simple_chroma_limit'):
+            if k in result:result[k]=int(result[k])
         return result
     def save(self):write(self.path,dict({k:v.get() for k,v in self.values.items()},settings=self.settings()))
     def guarded(self,fn):

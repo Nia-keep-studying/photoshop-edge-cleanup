@@ -6,5 +6,9 @@
   "agent_timeout": 600,
   "no_reference_default": true,
   "allow_colour_repair": true,
-  "mixed": false
+  "mixed": false,
+  "simple_black_edge": false,
+  "simple_max_width": 24,
+  "simple_dark_threshold": 235,
+  "simple_chroma_limit": 80
 }

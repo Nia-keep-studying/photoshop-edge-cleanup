@@ -94,6 +94,21 @@ class BatchTests(unittest.TestCase):
         p=plan();p['operations'][0]['width_mode']='fixed';p['operations'][0]['max_width']=12
         output,_=candidate(im,p,compile_plan(p,im.size));a=np.array(output)
         self.assertTrue(np.all(a[20:41,10:12,3]==255));self.assertEqual(a[30,5,3],0)
+    def test_simple_black_edge_removes_disconnected_outer_band(self):
+        im=Image.new('RGBA',(100,100),(0,0,0,0));d=ImageDraw.Draw(im)
+        d.rectangle((10,10,89,89),fill='white')
+        d.rectangle((15,15,84,84),outline='black',width=2)
+        p=plan();p['operations'][0]['width_mode']='fixed';p['operations'][0]['max_width']=12
+        compiled=compile_plan(p,im.size)
+        normal,_=candidate(im,p,compiled)
+        simple,_=candidate(im,p,compiled,simple_black_edge=True,simple_max_width=20)
+        self.assertEqual(np.array(normal)[15,30,3],255)
+        self.assertEqual(np.array(simple)[15,30,3],0)
+    def test_simple_mode_builds_plan_without_planner_call(self):
+        self.settings['simple_black_edge']=True;self.settings['simple_max_width']=20
+        store,bid,p=self.make();p.run()
+        self.assertNotIn('制定区域方案',FakeAgent.calls)
+        self.assertEqual(store.jobs(bid)[0]['status'],'passed')
     def test_outer_recolour_cannot_hide_under_local_fill(self):
         with Image.open(self.inputs/'one.png') as im:original=im.convert('RGBA')
         p=plan();p['operations'][0].update(method='local_fill',regions=[[[80,200],[140,200],[140,800],[80,800]]],colour=[255,255,255])

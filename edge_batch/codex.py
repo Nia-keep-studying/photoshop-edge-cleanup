@@ -71,6 +71,7 @@ class CodexRunner:
 
 def planner_prompt(metadata,feedback=None):
     guidance=(SKILL/'SKILL.md').read_text(encoding='utf-8-sig')+'\n'+(SKILL/'references/detail-repair.md').read_text(encoding='utf-8-sig')
+    simple_note='''\n本批次启用了 simple_black_edge 简化模式：不做场景语义判断，不生成 local_fill 或 contract；若输入确实是“只需去黑边”的素材，优先生成一个或多个 erase_edge 操作。执行器会在实际 alpha 外缘的较宽暗色带内删除黑边，内部黑色内容只有落在该外缘带内才会被处理。''' if metadata.get('simple_black_edge') else ''
     return '''根据原始平面图及对应参考，给出一个可执行的保守方案。以下 skill 是视觉规则，实际执行由宿主程序负责；不要调用其中的脚本。
 '''+guidance+'''
 固定工具能力：
@@ -96,7 +97,7 @@ kind=export 且 operations=[] 时不需要 protect_regions 或 uncertain_regions
 即使只导出，reference_observations、remove_rules、preserve_rules 也必须各有至少一句说明，可写“本图不去边”。
 所有 operations 字段必须填写。edge_only 的用途是选择 alpha 外缘限制。内部子图形描边接实体底板时可用小范围 local_fill；外框残点继续抠透，不能用补白兜底。
 返回的是从原图重新处理的完整方案；补修时保留上轮已正确规则，禁止基于误删图继续扩大误删。若上轮验收指出残边，优先在问题框对应的实体外缘增加 1..4 像素窄带 erase_edge，必要时将 dark_threshold 提到 245、chroma_limit 提到 140；不要把原有多边形整体向主体内部扩张。若上轮验收确认黑边属于设计轮廓，则改为 export-only，从原图重新导出，不继续抠除。
-本次任务的额外定向要求（优先级高于默认启发式，仅适用于本图）：'''+(metadata.get('targeted_guidance') or '无')+'''\n数据：'''+json.dumps(metadata,ensure_ascii=False)+'\n上轮独立验收问题（若有）：'+json.dumps(feedback,ensure_ascii=False)
+'''+simple_note+'''\n本次任务的额外定向要求（优先级高于默认启发式，仅适用于本图）：'''+(metadata.get('targeted_guidance') or '无')+'''\n数据：'''+json.dumps(metadata,ensure_ascii=False)+'\n上轮独立验收问题（若有）：'+json.dumps(feedback,ensure_ascii=False)
 
 def review_prompt(metadata):
     return '''你是独立验收步骤，未参与本图处理。查看原图、参考图、实际 PS 输出在白/灰/深底上的展示及沿轮廓分块的放大图。

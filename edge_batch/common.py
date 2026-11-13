@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 SKILL=ROOT/'skills/photoshop-edge-cleanup'
-VERSION='batch-v3.1-targeted-edge'
+VERSION='batch-v3.2-simple-edge'
 TERMINAL={'passed','partial','failed'}
 
 def read(path):return json.loads(Path(path).read_text(encoding='utf-8-sig'))
@@ -62,14 +62,19 @@ class ProcessLock:
 def defaults():
     return {'photoshop_exe':os.environ.get('PS_EDGE_PHOTOSHOP_EXE',''),
             'codex_exe':'codex','model':'','max_repairs':2,'agent_timeout':600,
-            'no_reference_default':True,'allow_colour_repair':True,'mixed':False}
+            'no_reference_default':True,'allow_colour_repair':True,'mixed':False,
+            'simple_black_edge':False,'simple_max_width':24,
+            'simple_dark_threshold':235,'simple_chroma_limit':80}
 
 def validate_settings(settings):
     out=defaults();out.update(settings)
     if type(out['max_repairs']) is not int or not 0<=out['max_repairs']<=2:raise ValueError('补修轮数必须为 0 到 2。')
     if type(out['agent_timeout']) is not int or not 60<=out['agent_timeout']<=1800:raise ValueError('Codex 超时必须为 60 到 1800 秒。')
-    for key in ('no_reference_default','allow_colour_repair','mixed'):
+    for key in ('no_reference_default','allow_colour_repair','mixed','simple_black_edge'):
         if type(out[key]) is not bool:raise ValueError(key+' 必须是布尔值。')
+    if type(out['simple_max_width']) is not int or not 1<=out['simple_max_width']<=64:raise ValueError('简单黑边最大宽度必须为 1 到 64。')
+    for key in ('simple_dark_threshold','simple_chroma_limit'):
+        if type(out[key]) is not int or not 0<=out[key]<=255:raise ValueError(key+' 必须是 0 到 255。')
     for key in ('photoshop_exe','codex_exe','model'):
         if not isinstance(out[key],str):raise ValueError(key+' 必须是字符串。')
     return out

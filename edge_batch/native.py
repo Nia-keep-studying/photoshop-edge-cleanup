@@ -80,7 +80,10 @@ class NativeBackend:
         with Image.open(source) as original:
             prepared,kind=ps.prepare_source(original,plan['remove_white_background'],plan['allow_edge_touching'],plan['frame_barriers'])
         if prepared.getchannel('A').getbbox() is None:raise ValueError('背景分离后主体为空。')
-        prepared.save(folder/'prepared.png');desired,metrics=candidate(prepared,plan,compiled)
+        prepared.save(folder/'prepared.png');desired,metrics=candidate(
+            prepared,plan,compiled,
+            simple_black_edge=self.settings.get('simple_black_edge',False),
+            simple_max_width=self.settings.get('simple_max_width'))
         alpha_changes=alpha_audit(prepared,desired)
         if any(op['method']=='erase_edge' for op in compiled['operations']) and not alpha_changes['fully_cleared_pixels']:
             raise ValueError('透明去边没有清除任何目标像素，不能用颜色改变或空操作替代抠图。')

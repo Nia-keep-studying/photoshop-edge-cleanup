@@ -81,6 +81,8 @@ class Pipeline:
         self.references=[self.items[k] for k,r in roles.items() if r['role']=='reference']
         self.roles=roles
     def match(self,item,folder):
+        if self.settings.get('simple_black_edge'):
+            return None
         path=folder/'match.json'
         if path.exists():answer=read(path)
         elif not self.references:answer={'status':'none','reference_id':'','reason':'本批次没有参考图'};write(path,answer)
@@ -100,6 +102,23 @@ class Pipeline:
             return self.items[answer['reference_id']]
         if answer['status']!='none' or not self.settings['no_reference_default']:raise ValueError('缺少可靠参考，且未授权无参考默认规则。')
         return None
+    def simple_plan(self,item):
+        facts=image_facts(item['snapshot'])
+        remove_white=bool(facts['alpha_min']>=128 and facts['frame_light_fraction']>=0.985)
+        width=min(64,max(1,int(self.settings.get('simple_max_width',24))))
+        dark=int(self.settings.get('simple_dark_threshold',235));chroma=int(self.settings.get('simple_chroma_limit',80))
+        return {'title':'简化黑边清理 · '+item['relative'],'kind':'trim','edge_policy':'transparent_remove',
+                'reference_matches':False,'reference_mode':'none','is_flat_artwork':True,
+                'remove_white_background':remove_white,'allow_edge_touching':False,'frame_barriers':[],
+                'coordinate_system':'normalized_1000',
+                'reference_observations':['本图使用 simple_black_edge 简化模式，不依赖参考图。'],
+                'remove_rules':['删除实际 alpha 外缘较宽暗色带内的黑色或深色边缘，并将其变为透明。'],
+                'preserve_rules':['保留主体内部内容；只处理配置的外缘带。'],
+                'protect_regions':[],'uncertain_regions':[],'unresolved_notes':[],
+                'operations':[{'method':'erase_edge','regions':[[[0,0],[1000,0],[1000,1000],[0,1000]]],
+                               'donor_regions':[],'colour':[0,0,0],'width_mode':'fixed','max_width':width,
+                               'dark_threshold':dark,'chroma_limit':chroma,'donor_tolerance':0,
+                               'edge_only':True,'reason':'simple_black_edge：外缘暗色带透明化。'}]}
     def run(self):
         with ProcessLock(self.store.root/'queue.lock'),ProcessLock(self.channel_lock):
             try:
@@ -143,6 +162,7 @@ class Pipeline:
         meta={'source':{k:item[k] for k in ('id','relative','size','mode')},'reference':reference['relative'] if reference else None,
               'pixel_facts':image_facts(item['snapshot']),
               'no_reference_default':self.settings['no_reference_default'],'allow_colour_repair':self.settings['allow_colour_repair'],
+              'simple_black_edge':self.settings.get('simple_black_edge',False),
               'targeted_guidance':self.settings.get('per_image_guidance',{}).get(item['relative'],''),
               'acceptance':'没有多余黑边；不误删主体；有意设计线条保留。'}
         grid=folder/'source_coordinates.png';coordinate_preview(item['snapshot'],grid)
@@ -163,7 +183,8 @@ class Pipeline:
                 self.store.update(job['id'],status='planning',attempt=number,result={'active':str(attempt)})
                 plan=None
                 try:
-                    plan=self.call('制定区域方案',planner_prompt(meta,feedback),schemas.PLAN,[item['snapshot']]+([ref] if ref else [])+[grid],attempt/'plan-calls')
+                    plan=(self.simple_plan(item) if self.settings.get('simple_black_edge') else
+                          self.call('制定区域方案',planner_prompt(meta,feedback),schemas.PLAN,[item['snapshot']]+([ref] if ref else [])+[grid],attempt/'plan-calls'))
                     # An export-only plan has no edit scope. Discard any
                     # optional region annotations before compilation so stale
                     # or malformed polygons cannot turn a no-op export into a

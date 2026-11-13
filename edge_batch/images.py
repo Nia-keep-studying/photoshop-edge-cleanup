@@ -95,7 +95,7 @@ def compile_plan(plan,size,allow_colour=True):
         op=dict(operation)
         if op['method'] not in ('erase_edge','clear_specks','local_fill','contract'):raise ValueError('外围黑边须抠成透明；不再接受 white_edge/sample_edge 补色代替去边。')
         if not allow_colour and op['method']=='local_fill':raise ValueError('本批次未授权内部局部补色。')
-        if type(op['max_width']) is not int or not 1<=op['max_width']<=32:raise ValueError('边宽必须为 1..32 原图像素。')
+        if type(op['max_width']) is not int or not 1<=op['max_width']<=64:raise ValueError('边宽必须为 1..64 原图像素。')
         if op['width_mode'] not in ('auto','fixed'):raise ValueError('未知边宽模式。')
         for key in ('dark_threshold','chroma_limit','donor_tolerance'):
             if type(op[key]) is not int or not 0<=op[key]<=255:raise ValueError('颜色阈值必须为 0..255。')
@@ -109,7 +109,7 @@ def compile_plan(plan,size,allow_colour=True):
         remove.extend(op['regions']);compiled.append(op)
     return {'operations':compiled,'remove_regions':remove,'protect_regions':protect,'uncertain_regions':uncertain}
 
-def candidate(prepared,plan,compiled):
+def candidate(prepared,plan,compiled,simple_black_edge=False,simple_max_width=None):
     source=np.array(prepared);out=source.copy();rgb=source[:,:,:3].astype('float32');alpha=source[:,:,3];core=alpha>=128
     if compiled['operations'] and core.all():raise ValueError('输入仍是整幅不透明背景，无法可靠识别外轮廓，请检查背景分离。')
     depth=ndi.distance_transform_edt(core)
@@ -120,15 +120,26 @@ def candidate(prepared,plan,compiled):
         mx=rgb.max(2);spread=np.ptp(rgb,axis=2)
         dark=(mx<op['dark_threshold'])&(spread<=op['chroma_limit'])&area
         width=op['max_width']
+        if simple_black_edge and op['method']=='erase_edge':
+            width=max(width,int(simple_max_width or width))
         if op['width_mode']=='auto' and op['edge_only']:
             reachable=ndi.binary_propagation(dark&(depth<=2),mask=dark&(depth<=width))
             if reachable.any():width=min(width,max(1,int(np.ceil(np.quantile(depth[reachable],.99)))+2))
         eligible=dark&(depth<=width) if op['edge_only'] else dark
         count=int(eligible.sum());note=''
         if op['method']=='erase_edge':
-            # Delete only dark pixels connected to the actual exterior, within
-            # the authorized band. Disconnected nearby lettering stays intact.
-            eligible=ndi.binary_propagation(eligible&(depth<=2),mask=eligible)
+            if simple_black_edge:
+                # The simple preset is intentionally more aggressive: all
+                # dark pixels in the configured outer alpha band are treated
+                # as border pixels. It is only enabled for images explicitly
+                # classified as "simple black edge"; interior content outside
+                # the band remains untouched.
+                note='simple_outer_band'
+            else:
+                # Delete only dark pixels connected to the actual exterior,
+                # within the authorized band. Disconnected nearby lettering
+                # stays intact.
+                eligible=ndi.binary_propagation(eligible&(depth<=2),mask=eligible)
             count=int(eligible.sum());out[eligible,3]=0
         elif op['method']=='clear_specks':
             labels,_=ndi.label(out[:,:,3]>0,structure=np.ones((3,3)))
