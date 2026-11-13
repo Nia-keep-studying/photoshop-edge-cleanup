@@ -63,8 +63,8 @@ def defaults():
     return {'photoshop_exe':os.environ.get('PS_EDGE_PHOTOSHOP_EXE',''),
             'codex_exe':'codex','model':'','max_repairs':2,'agent_timeout':600,
             'no_reference_default':True,'allow_colour_repair':True,'mixed':False,
-            'simple_black_edge':False,'simple_max_width':8,
-            'simple_dark_threshold':235,'simple_chroma_limit':80}
+            'simple_black_edge':False,'simple_max_width':12,
+            'simple_dark_threshold':245,'simple_chroma_limit':140}
 
 def validate_settings(settings):
     out=defaults();out.update(settings)
